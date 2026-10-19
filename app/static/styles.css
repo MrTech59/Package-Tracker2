@@ -255,6 +255,32 @@ input:focus, select:focus, textarea:focus {
 select { cursor: pointer; }
 textarea { resize: vertical; min-height: 68px; font-family: inherit; }
 
+.filter-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+}
+.filter-chip strong { color: var(--text); font-weight: 580; }
+.chip-clear {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 0.82rem;
+  font-family: inherit;
+  font-weight: 580;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.chip-clear:hover { text-decoration: underline; }
+
 /* ------------------------------------------------------------ package list */
 
 .package-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }

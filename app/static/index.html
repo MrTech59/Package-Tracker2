@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#0f1420" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/styles.css?v=1.0.0" />
 </head>
 <body>
   <header class="topbar">
@@ -82,6 +82,8 @@
         <option value="name">Name (A–Z)</option>
       </select>
     </section>
+
+    <div id="filter-chip" class="filter-chip" hidden></div>
 
     <!-- Package list -->
     <section id="list-region" aria-live="polite">
@@ -205,6 +207,6 @@
 
   <div id="toasts" class="toasts" aria-live="polite"></div>
 
-  <script src="/static/app.js" defer></script>
+  <script src="/static/app.js?v=1.0.0" defer></script>
 </body>
 </html>

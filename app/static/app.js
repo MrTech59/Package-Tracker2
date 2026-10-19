@@ -5,6 +5,8 @@ const state = {
   config: null,
   stats: null,
   filters: { q: "", status: "all", carrier: "all", sort: "newest" },
+  // Driven by the dashboard stat cards; null when no quick filter is active.
+  statFilter: null,
   expanded: new Set(),
   busy: new Set(),
 };
@@ -93,10 +95,46 @@ function escapeHtml(value) {
 
 /* ------------------------------------------------------------------- render */
 
+// Quick-filter state driven by the dashboard stat cards.
+// `null` = off, a status value = that status, "problems" = delayed OR exception.
+function applyStatFilter(target) {
+  if (!target) {
+    state.filters.status = "all";
+    $("filter-status").value = "all";
+    renderList();
+    renderStats();
+    return;
+  }
+  if (target === "problems") {
+    // Spans two statuses, so leave the single-status dropdown on "all".
+    state.filters.status = "all";
+    $("filter-status").value = "all";
+  } else {
+    state.filters.status = target;
+    $("filter-status").value = target;
+  }
+  renderList();
+  renderStats();
+}
+
+function matchesStatFilter(p) {
+  const target = state.statFilter;
+  if (!target) return true;
+  if (target === "problems") return p.status_is_problem;
+  if (target === "delivered") return p.status === "delivered";
+  if (target === "out_for_delivery") return p.status === "out_for_delivery";
+  if (target === "in_flight") {
+    // "In flight" covers everything not yet delivered or terminal.
+    return !p.status_is_terminal && p.status !== "delayed" && p.status !== "exception";
+  }
+  return true;
+}
+
 function visiblePackages() {
   const { q, status, carrier, sort } = state.filters;
   let list = [...state.packages];
 
+  list = list.filter(matchesStatFilter);
   if (q) {
     const needle = q.toLowerCase();
     list = list.filter((p) =>
@@ -133,7 +171,10 @@ function renderStats() {
   $("stat-total").textContent = s.total;
 
   document.querySelectorAll(".stat-card").forEach((card) => {
-    card.classList.toggle("is-active", card.dataset.stat === `filter-${state.filters.status}`);
+    const key = { in_flight: "in_flight", out_for_delivery: "out_for_delivery",
+                  delivered: "delivered", problems: "problems", total: "all" }[card.dataset.stat];
+    const active = state.statFilter ? key === state.statFilter : false;
+    card.classList.toggle("is-active", active);
   });
 
   const upcoming = s.upcoming || [];
@@ -218,10 +259,30 @@ function renderList() {
   const emptyEl = $("empty-state");
 
   const noPackagesAtAll = state.packages.length === 0;
-  const noMatches = list.length === 0 && !noPackagesAtAll;
+  const filtered = list.length === 0 && !noPackagesAtAll;
+
+  // Make an active quick filter obvious, and offer a one-click way out.
+  const chip = $("filter-chip");
+  if (state.statFilter || state.filters.status !== "all" || state.filters.carrier !== "all" || state.filters.q) {
+    const parts = [];
+    if (state.filters.q) parts.push(`search “${state.filters.q}”`);
+    if (state.statFilter === "problems") parts.push("needs attention");
+    else if (state.filters.status !== "all") {
+      parts.push(state.config?.statuses.find((s) => s.value === state.filters.status)?.label || state.filters.status);
+    }
+    if (state.filters.carrier !== "all") {
+      parts.push(state.config?.carriers.find((c) => c.id === state.filters.carrier)?.name || state.filters.carrier);
+    }
+    chip.hidden = false;
+    chip.innerHTML = `Filtered: <strong>${escapeHtml(parts.join(" · "))}</strong>
+      <button type="button" class="chip-clear" data-action="clear-filters">Clear</button>`;
+  } else {
+    chip.hidden = true;
+    chip.innerHTML = "";
+  }
 
   emptyEl.hidden = list.length > 0;
-  if (noMatches) {
+  if (filtered) {
     emptyEl.querySelector("h3").textContent = "No matching packages";
     emptyEl.querySelector("p").textContent = "Try clearing your search or filters.";
   } else if (noPackagesAtAll) {
@@ -573,7 +634,10 @@ function wireEvents() {
 
   $("filter-status").addEventListener("change", (e) => {
     state.filters.status = e.target.value;
+    // A manual status choice supersedes any stat-card quick filter.
+    state.statFilter = null;
     renderList();
+    renderStats();
   });
   $("filter-carrier").addEventListener("change", (e) => {
     state.filters.carrier = e.target.value;
@@ -584,28 +648,40 @@ function wireEvents() {
     renderList();
   });
 
-  // Stat cards double as quick filters.
+  // Clear-all-from-the-filter-chip.
+  $("filter-chip").addEventListener("click", (e) => {
+    if (!e.target.closest("[data-action='clear-filters']")) return;
+    state.filters.q = "";
+    state.filters.status = "all";
+    state.filters.carrier = "all";
+    state.statFilter = null;
+    $("search").value = "";
+    $("filter-status").value = "all";
+    $("filter-carrier").value = "all";
+    renderList();
+    renderStats();
+  });
+
+  // Stat cards double as quick filters. Clicking the active card clears it.
   document.querySelectorAll(".stat-card").forEach((card) => {
     card.addEventListener("click", () => {
       const map = {
-        in_flight: "in_transit", out_for_delivery: "out_for_delivery",
-        delivered: "delivered", problems: "exception", total: "all",
+        in_flight: "in_transit",
+        out_for_delivery: "out_for_delivery",
+        delivered: "delivered",
+        problems: "problems",
+        total: "all",
       };
       const target = map[card.dataset.stat] || "all";
-      state.filters.status = target === "all" ? "all" : target;
-      $("filter-status").value = state.filters.status;
-      if (target === "exception") {
-        // "Needs attention" spans two statuses; approximate with the filter UI.
-        state.filters.status = "all";
-        $("filter-status").value = "all";
-        const problems = state.packages.filter((p) => p.status_is_problem);
-        $("search").value = "";
-        state.filters.q = "";
-        renderList();
-        toast(`${problems.length} package(s) need attention.`, problems.length ? "warn" : "", 3200);
+
+      // Toggle off when the same card is clicked again.
+      if (state.statFilter === target) {
+        state.statFilter = null;
+        applyStatFilter(null);
         return;
       }
-      renderList();
+      state.statFilter = target;
+      applyStatFilter(target);
     });
   });
 
