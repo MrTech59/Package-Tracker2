@@ -165,6 +165,7 @@ async def health() -> dict[str, Any]:
 @app.get("/api/config")
 async def get_config() -> dict[str, Any]:
     return {
+        "version": __version__,
         "carriers": [c.as_dict() for c in CARRIERS.values()],
         "statuses": [{"value": s.value, "label": s.label} for s in Status],
         "scrape_enabled": settings.scrape_enabled,

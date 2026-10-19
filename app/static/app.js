@@ -523,11 +523,18 @@ async function openSettings() {
   const dialog = $("dialog-settings");
   const cfg = state.config;
   if (cfg) {
-    $("settings-note").textContent =
-      `MCP: ${cfg.mcp_url} · Telegram: ${cfg.telegram_enabled ? "enabled" : "not configured"} · ` +
-      `Auto-poll: ${cfg.scrape_enabled ? `every ${Math.round(cfg.poll_interval_seconds / 60)} min` : "disabled"}`;
+    const parts = [];
+    if (cfg.version) parts.push(`v${cfg.version}`);
+    parts.push(`MCP: ${cfg.mcp_url}`);
+    parts.push(`Telegram: ${cfg.telegram_enabled ? "enabled" : "not configured"}`);
+    parts.push(
+      `Auto-poll: ${cfg.scrape_enabled ? `every ${Math.round(cfg.poll_interval_seconds / 60)} min` : "disabled"}`
+    );
+    $("settings-note").textContent = parts.join(" · ");
   }
   dialog.showModal();
+
+  renderVersionDiag(cfg);
 
   const mcpPill = $("diag-mcp");
   mcpPill.className = "pill pill-muted"; mcpPill.textContent = "checking…";
@@ -546,6 +553,30 @@ async function openSettings() {
   }
 
   await Promise.all([checkTelegramDiag(), refreshPairing()]);
+}
+
+/* The backend reports its version in /api/config, so this catches a stale
+   deployment (old code still running after an update) at a glance. */
+function renderVersionDiag(cfg) {
+  const pill = $("diag-version");
+  const detail = $("diag-version-detail");
+  const version = cfg?.version;
+
+  if (!version) {
+    pill.className = "pill pill-warn";
+    pill.textContent = "unknown";
+    detail.textContent =
+      "The server did not report a version. If you just updated, reload the page " +
+      "(Ctrl+Shift+R).";
+    return;
+  }
+
+  pill.className = "pill pill-ok";
+  pill.textContent = `v${version}`;
+  detail.textContent =
+    `Application: Package Tracker v${version}\n` +
+    `If an update completed but this still shows an old number, ` +
+    `reload with Ctrl+Shift+R before assuming the update failed.`;
 }
 
 
@@ -583,15 +614,27 @@ async function refreshPairing() {
       hint.textContent =
         "Add TELEGRAM_BOT_TOKEN to your .env file, then restart the service to enable pairing.";
       steps.hidden = true;
-      pairAuto.disabled = true;
-      pairManual.disabled = true;
+      // Keep these clickable so pressing them explains what is missing
+      // instead of appearing dead.
+      pairAuto.disabled = false;
+      pairManual.disabled = false;
+      pairAuto.classList.add("is-blocked");
+      pairManual.classList.add("is-blocked");
       unpair.hidden = true;
-      detail.textContent = "";
+      detail.textContent =
+        `TELEGRAM_BOT_TOKEN is not set, so there is nothing to pair with yet.\n\n` +
+        `On the server:\n` +
+        `  nano /opt/package-tracker/.env\n` +
+        `  TELEGRAM_BOT_TOKEN=123456:ABC-DEF...\n` +
+        `  systemctl restart package-tracker\n\n` +
+        `Get a token from @BotFather in Telegram (/newbot).`;
       return;
     }
 
     pairAuto.disabled = false;
     pairManual.disabled = false;
+    pairAuto.classList.remove("is-blocked");
+    pairManual.classList.remove("is-blocked");
     steps.hidden = false;
 
     if (p.paired) {
@@ -623,6 +666,14 @@ async function refreshPairing() {
 async function pairAutomatically() {
   const btn = $("btn-pair-auto");
   const detail = $("pair-detail");
+
+  // Without a token there is nothing to listen on; say so rather than
+  // starting a 20-second wait that is guaranteed to time out.
+  if (state.pairing && !state.pairing.has_token) {
+    showMissingTokenHelp();
+    return;
+  }
+
   btn.disabled = true;
   btn.classList.add("is-busy");
   const original = btn.textContent;
@@ -655,9 +706,27 @@ async function pairAutomatically() {
 }
 
 function toggleManualPair() {
+  if (state.pairing && !state.pairing.has_token) {
+    showMissingTokenHelp();
+    return;
+  }
   const box = $("pair-manual");
   box.hidden = !box.hidden;
   if (!box.hidden) $("pair-chat-id").focus();
+}
+
+/* Explain how to fix the missing bot token, and copy a ready-to-paste line. */
+function showMissingTokenHelp() {
+  const detail = $("pair-detail");
+  detail.textContent =
+    `TELEGRAM_BOT_TOKEN is not set, so there is no bot to pair with yet.\n\n` +
+    `1. In Telegram, message @BotFather and send /newbot to get a token.\n` +
+    `2. On the server:\n` +
+    `     nano /opt/package-tracker/.env\n` +
+    `     TELEGRAM_BOT_TOKEN=<your token>\n` +
+    `     systemctl restart package-tracker\n` +
+    `3. Reopen Settings, then press Pair automatically.`;
+  toast("No Telegram bot token configured yet — see the steps shown.", "err", 5000);
 }
 
 async function saveManualPair() {
@@ -665,6 +734,10 @@ async function saveManualPair() {
   const chatId = input.value.trim();
   if (!chatId) {
     toast("Enter a chat ID first.", "err");
+    return;
+  }
+  if (state.pairing && !state.pairing.has_token) {
+    showMissingTokenHelp();
     return;
   }
   try {
@@ -896,6 +969,10 @@ async function boot() {
   try {
     state.config = await api("/api/config");
     buildSelects();
+    const brandVersion = $("brand-version");
+    if (brandVersion && state.config.version) {
+      brandVersion.textContent = `v${state.config.version}`;
+    }
   } catch (err) {
     setConnection("bad", "offline");
     toast(`Cannot reach backend: ${err.message}`, "err", 8000);

@@ -80,6 +80,17 @@ body { min-height: 100vh; }
 .brand { display: flex; align-items: center; gap: 10px; }
 .logo { width: 26px; height: 26px; fill: var(--accent); flex: none; }
 .brand h1 { margin: 0; font-size: 1.05rem; letter-spacing: -0.01em; font-weight: 650; }
+.brand-version {
+  font-size: 0.7rem;
+  font-family: var(--mono);
+  color: var(--text-faint);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 7px;
+  line-height: 1.5;
+}
+.brand-version:empty { display: none; }
 
 .topbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
@@ -459,18 +470,16 @@ textarea { resize: vertical; min-height: 68px; font-family: inherit; }
 .settings-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .settings-note { font-size: 0.78rem; color: var(--text-faint); margin: 0; }
 
+/* A class selector (.settings-actions, .pair-manual) outranks the browser's
+   built-in [hidden] rule, which silently defeats element.hidden = true.
+   Make the attribute authoritative for every element we toggle that way. */
+[hidden] { display: none !important; }
+
 /* --------------------------------------------------------- telegram pairing */
 
 .pair-hint { margin: 0; font-size: 0.82rem; color: var(--text-dim); }
-.pair-steps {
-  margin: 0;
-  padding-left: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 0.79rem;
-  color: var(--text-faint);
-}
+.pair-steps { margin: 0; padding-left: 18px; font-size: 0.79rem; color: var(--text-faint); }
+.pair-steps li { margin: 3px 0; }
 .pair-steps code,
 .pair-hint code {
   font-family: var(--mono);
@@ -481,10 +490,13 @@ textarea { resize: vertical; min-height: 68px; font-family: inherit; }
   color: var(--text-dim);
 }
 .pair-manual { display: flex; gap: 8px; }
-.pair-manual[hidden] { display: none; }
 .pair-manual .input { flex: 1 1 auto; min-width: 0; }
 .input-sm { padding: 6px 10px; font-size: 0.82rem; }
 .btn.is-busy { opacity: 0.75; cursor: progress; }
+/* Buttons that are clickable but need setup first: hint that they will
+   explain rather than act. */
+.btn.is-blocked { opacity: 0.8; }
+.btn.is-blocked::after { content: " ⓘ"; opacity: 0.7; }
 
 /* ----------------------------------------------------------------- toasts */
 
