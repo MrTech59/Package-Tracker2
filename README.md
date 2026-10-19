@@ -178,19 +178,51 @@ MCP_TIMEOUT_SECONDS=60
 
 ### Telegram
 
-1. Create a bot with [@BotFather](https://t.me/botfather) and copy the token.
-2. Send your bot any message (a bot cannot message you first).
-3. Get your chat id: `curl "https://api.telegram.org/bot<TOKEN>/getUpdates"` and
-   look for `"chat":{"id":...}`.
-4. Set the values:
+You need a bot token; the chat is then paired either from the dashboard (easiest)
+or by hand.
+
+**1. Create the bot.** Message [@BotFather](https://t.me/botfather), run
+`/newbot`, and copy the token. Put it in your `.env`:
 
 ```ini
-TELEGRAM_ENABLED=true
 TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
-TELEGRAM_CHAT_ID=987654321
 ```
 
-Use **Settings → Send test message** in the UI to confirm.
+Leave `TELEGRAM_CHAT_ID` blank and leave `TELEGRAM_ENABLED` unset — pairing
+turns alerts on for you.
+
+**2a. Pair from the dashboard (recommended).** Open **⚙︎ Settings → Telegram
+pairing**, then:
+
+1. Open Telegram and send `/start` to your bot.
+2. Press **Pair automatically**. The server watches `getUpdates` for up to 20
+   seconds, links whichever chat wrote in, stores the chat id in the database,
+   and sends a confirmation message.
+
+You can also press **Enter chat ID** and paste a numeric id if you already know
+it (useful for group chats).
+
+**2b. Pair by hand.** Set the id in `.env` instead:
+
+```bash
+# Send your bot a message first, then read the chat id from:
+curl "https://api.telegram.org/bot<TOKEN>/getUpdates"
+```
+
+```ini
+TELEGRAM_CHAT_ID=987654321
+TELEGRAM_ENABLED=true
+```
+
+**Notes**
+
+- A chat paired from the dashboard is saved in the database and **takes priority
+  over `TELEGRAM_CHAT_ID`**, so you can change it without editing files or
+  restarting.
+- **Unpair** clears the dashboard pairing and falls back to `TELEGRAM_CHAT_ID`.
+- Pairing auto-enables notifications *unless* you explicitly set
+  `TELEGRAM_ENABLED=false`, which is treated as a deliberate "keep alerts off".
+- Use **Settings → Send test message** to confirm delivery.
 
 ### Optional API key
 
@@ -198,8 +230,9 @@ Use **Settings → Send test message** in the UI to confirm.
 API_KEY=some-long-random-string
 ```
 
-When set, every `/api/*` route requires `X-Api-Key: <value>`. `/api/health`
-stays public so uptime checks keep working.
+When set, every `/api/*` route requires `X-Api-Key: <value>` — including the
+Telegram pairing routes. `/api/health` stays public so uptime checks keep
+working.
 
 ---
 
@@ -250,6 +283,10 @@ All routes are under `/api`. Add `X-Api-Key` when `API_KEY` is set.
 | `GET` | `/api/diagnostics/mcp` | MCP reachability + tool list |
 | `GET` | `/api/diagnostics/telegram` | Bot + chat validation |
 | `POST` | `/api/diagnostics/telegram/test` | Send a test message |
+| `GET` | `/api/telegram/pair` | Current pairing state |
+| `POST` | `/api/telegram/pair/auto` | Wait for a message, then pair that chat |
+| `POST` | `/api/telegram/pair` | Pair a specific chat id |
+| `DELETE` | `/api/telegram/pair` | Unpair (fall back to `TELEGRAM_CHAT_ID`) |
 | `GET` | `/api/export` | Download JSON |
 | `POST` | `/api/import` · `/api/import/raw` | Restore JSON |
 
@@ -308,9 +345,13 @@ That carrier renders in an iframe. It should fall back to 17track; check the
 package's History panel to see which URL was actually read.
 
 **No Telegram messages**
-Confirm `TELEGRAM_ENABLED=true`, and that you have messaged the bot at least
-once. Test with Settings → Send test message. Notifications fire only on an
-actual status *change*, not on every poll.
+Pair a chat first (**Settings → Telegram pairing**, or set
+`TELEGRAM_CHAT_ID`). Test with **Settings → Send test message**. Notifications
+fire only on an actual status *change*, not on every poll.
+
+Pairing errors are spelled out in the dialog — a `401` means the bot token in
+`.env` is wrong or was revoked, and a `409` means something else is already
+polling that bot with `getUpdates`.
 
 **Status never advances**
 Background polling also skips terminal states and honours

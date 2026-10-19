@@ -116,6 +116,12 @@ async def lifespan(app: FastAPI):
     app.state.db = db
     app.state.service = service
 
+    # A chat paired through the dashboard is stored in the database so it
+    # survives restarts without the operator touching .env.
+    paired = service.load_paired_chat()
+    if paired:
+        log.info("Telegram paired chat loaded from database: %s", paired)
+
     poll_task: asyncio.Task | None = None
     if settings.scrape_enabled and settings.poll_interval_seconds > 0:
         poll_task = asyncio.create_task(service.poll_loop())
@@ -123,7 +129,6 @@ async def lifespan(app: FastAPI):
     log.info("Package Tracker %s ready on %s:%s", __version__, settings.host, settings.port)
     log.info("MCP endpoint: %s | Telegram: %s", settings.mcp_url,
              "enabled" if service.notifier.enabled else "disabled")
-
     try:
         yield
     finally:
@@ -333,6 +338,49 @@ async def telegram_test() -> dict[str, Any]:
         "🔔 <b>Package Tracker</b>\nTest notification — your Telegram alerts are working."
     )
     return result
+
+
+# ----------------------------------------------------------- telegram pairing
+
+
+class PairIn(BaseModel):
+    chat_id: str = Field(..., min_length=1, max_length=64)
+    name: str = Field(default="", max_length=200)
+
+
+@app.get("/api/telegram/pair", dependencies=[Depends(require_api_key)])
+async def telegram_pair_status() -> dict[str, Any]:
+    """Current pairing state, including whether a bot token is set."""
+    return svc().pairing_status()
+
+
+@app.post("/api/telegram/pair/auto", dependencies=[Depends(require_api_key)])
+async def telegram_pair_auto(
+    timeout: float = Query(default=20.0, ge=3, le=55),
+) -> dict[str, Any]:
+    """Wait for the user to message the bot, then pair with that chat."""
+    result = await svc().auto_pair(timeout=timeout)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Pairing failed"))
+    return result
+
+
+@app.post("/api/telegram/pair", dependencies=[Depends(require_api_key)])
+async def telegram_pair_manual(payload: PairIn) -> dict[str, Any]:
+    """Pair with a chat id supplied directly (paste from @userinfobot etc.)."""
+    try:
+        pairing = svc().apply_pairing(payload.chat_id, payload.name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "pairing": pairing}
+
+
+@app.delete("/api/telegram/pair", dependencies=[Depends(require_api_key)])
+async def telegram_unpair() -> dict[str, Any]:
+    """Forget the paired chat."""
+    svc().unpair()
+    return {"ok": True, "pairing": svc().pairing_status()}
+
 
 
 # ------------------------------------------------------------ import / export

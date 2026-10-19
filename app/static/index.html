@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#0f1420" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="stylesheet" href="/static/styles.css?v=1.0.0" />
+  <link rel="stylesheet" href="/static/styles.css?v=1.1.0" />
 </head>
 <body>
   <header class="topbar">
@@ -187,6 +187,35 @@
 
       <div class="diag">
         <div class="diag-row">
+          <span class="diag-name">Telegram pairing</span>
+          <span id="pair-status" class="pill pill-muted">checking…</span>
+        </div>
+        <p class="pair-hint" id="pair-hint">
+          Pair the tracker with your Telegram chat to receive delivery alerts.
+        </p>
+
+        <ol class="pair-steps" id="pair-steps">
+          <li>Add your bot token in <code>.env</code> (<code>TELEGRAM_BOT_TOKEN</code>) and restart, if you haven't.</li>
+          <li>Open Telegram and send <code>/start</code> to your bot.</li>
+          <li>Press <b>Pair automatically</b> below — it waits for your message and links the chat.</li>
+        </ol>
+
+        <pre id="pair-detail" class="diag-detail"></pre>
+
+        <div class="settings-actions">
+          <button class="btn btn-primary btn-sm" type="button" id="btn-pair-auto">🔗 Pair automatically</button>
+          <button class="btn btn-ghost btn-sm" type="button" id="btn-pair-manual">Enter chat ID</button>
+          <button class="btn btn-ghost btn-sm" type="button" id="btn-unpair" hidden>Unpair</button>
+        </div>
+
+        <div class="pair-manual" id="pair-manual" hidden>
+          <input class="input input-sm" id="pair-chat-id" type="text" placeholder="e.g. 123456789" />
+          <button class="btn btn-primary btn-sm" type="button" id="btn-pair-save">Save</button>
+        </div>
+      </div>
+
+      <div class="diag">
+        <div class="diag-row">
           <span class="diag-name">Data</span>
           <span></span>
         </div>
@@ -207,6 +236,6 @@
 
   <div id="toasts" class="toasts" aria-live="polite"></div>
 
-  <script src="/static/app.js?v=1.0.0" defer></script>
+  <script src="/static/app.js?v=1.1.0" defer></script>
 </body>
 </html>

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any
 
@@ -50,6 +51,17 @@ class TrackerService:
         self.scraper = CarrierScraper(settings)
         self.notifier = TelegramNotifier(settings)
         self._scrape_locks: dict[int, asyncio.Lock] = {}
+        # Chat id that came from configuration (.env / environment) rather than
+        # from dashboard pairing. Unpairing restores this value. A non-empty
+        # settings value wins; otherwise fall back to the environment.
+        self._env_chat_id = (
+            (settings.telegram_chat_id or "").strip()
+            or (os.environ.get("TELEGRAM_CHAT_ID") or "").strip()
+        )
+        # Whether the operator explicitly set TELEGRAM_ENABLED in the
+        # environment / .env. When they did, we honour their choice and never
+        # auto-enable notifications; when they did not, pairing turns them on.
+        self._telegram_explicitly_configured = os.environ.get("TELEGRAM_ENABLED") is not None
 
     # ------------------------------------------------------------- read paths
 
@@ -220,6 +232,111 @@ class TrackerService:
             message=message,
             tracking_url=package.get("tracking_url", ""),
         )
+
+    # --------------------------------------------------------------- pairing
+
+    TELEGRAM_CHAT_META_KEY = "telegram_chat_id"
+
+    def _saved_chat_id(self) -> str:
+        return (self.db.get_meta(self.TELEGRAM_CHAT_META_KEY) or "").strip()
+
+    def telegram_chat_id(self) -> str:
+        """The active chat id: paired-at-runtime value wins over .env."""
+        return self._saved_chat_id() or self._configured_chat_id()
+
+    def _configured_chat_id(self) -> str:
+        """Chat id from configuration (.env / environment). Never the paired one."""
+        return self._env_chat_id
+
+    def load_paired_chat(self) -> str | None:
+        """Apply any persisted pairing to the running notifier.
+
+        Called on startup so a chat paired through the dashboard survives a
+        restart without editing .env.
+        """
+        saved = self._saved_chat_id()
+        if not saved:
+            return None
+        self.notifier.settings.telegram_chat_id = saved
+        # Pairing implies the user wants alerts. Preserve an explicit
+        # TELEGRAM_ENABLED=false from .env, but otherwise make sure the live
+        # notifier is actually on -- otherwise a paired chat would silently
+        # stop receiving messages after a restart.
+        if not self.notifier.settings.telegram_enabled and not self._telegram_explicitly_configured:
+            self.notifier.settings.telegram_enabled = True
+        return saved
+
+    def apply_pairing(self, chat_id: str, name: str = "", username: str = "") -> dict[str, Any]:
+        """Persist a chat id and switch the live notifier over to it."""
+        chat_id = str(chat_id).strip()
+        if not chat_id:
+            raise ValueError("chat_id is required")
+
+        self.db.set_meta(self.TELEGRAM_CHAT_META_KEY, chat_id)
+        self.db.set_meta(f"{self.TELEGRAM_CHAT_META_KEY}_name", name)
+        # Only the notifier's working copy changes; settings stay as configured.
+        self.notifier.settings.telegram_chat_id = chat_id
+        # Pairing implies the user wants alerts, so turn them on unless the
+        # operator explicitly disabled Telegram in .env.
+        if not self.notifier.settings.telegram_enabled and not self._telegram_explicitly_configured:
+            self.notifier.settings.telegram_enabled = True
+
+        log.info("Telegram paired with chat %s (%s)", chat_id, name or "unnamed")
+        return {
+            "chat_id": chat_id,
+            "name": name,
+            "username": username,
+            "notifications_enabled": self.notifier.enabled,
+        }
+
+    def unpair(self) -> None:
+        """Forget the paired chat (falls back to TELEGRAM_CHAT_ID from .env)."""
+        self.db.set_meta(self.TELEGRAM_CHAT_META_KEY, "")
+        self.db.set_meta(f"{self.TELEGRAM_CHAT_META_KEY}_name", "")
+        # Drop back to whatever configuration provided.
+        self.notifier.settings.telegram_chat_id = self._configured_chat_id()
+
+    def pairing_status(self) -> dict[str, Any]:
+        """Snapshot of how Telegram is wired up right now."""
+        saved = self._saved_chat_id()
+        chat_id = self.telegram_chat_id()
+        configured = self._configured_chat_id()
+        return {
+            "has_token": bool(self.settings.telegram_bot_token),
+            "chat_id": chat_id,
+            "chat_name": (self.db.get_meta(f"{self.TELEGRAM_CHAT_META_KEY}_name") or ""),
+            "paired": bool(chat_id),
+            "paired_via_dashboard": bool(saved),
+            "paired_from_env": bool(not saved and configured),
+            "notifications_enabled": self.notifier.enabled,
+            "enabled_flag": bool(self.settings.telegram_enabled),
+        }
+
+    async def auto_pair(self, timeout: float = 20.0) -> dict[str, Any]:
+        """Wait for a Telegram message and pair with the chat that sent it."""
+        if not self.settings.telegram_bot_token:
+            return {"ok": False, "error": "Add TELEGRAM_BOT_TOKEN first."}
+
+        found = await self.notifier.find_chat(timeout=timeout)
+        if not found.get("ok"):
+            return found
+
+        chat = found["chat"]
+        paired = self.apply_pairing(chat["chat_id"], chat.get("name", ""), chat.get("username", ""))
+
+        bot_username = ""
+        probe = await self.notifier.check_connection()
+        if probe.get("ok"):
+            bot_username = probe.get("bot") or ""
+        confirmation = await self.notifier.send_pairing_confirmation(chat["chat_id"], bot_username)
+
+        return {
+            "ok": True,
+            "chat": chat,
+            "pairing": paired,
+            "confirmation_sent": bool(confirmation.get("ok")),
+            "confirmation_error": confirmation.get("error") if not confirmation.get("ok") else None,
+        }
 
     # ------------------------------------------------------------- refreshing
 

@@ -459,6 +459,33 @@ textarea { resize: vertical; min-height: 68px; font-family: inherit; }
 .settings-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .settings-note { font-size: 0.78rem; color: var(--text-faint); margin: 0; }
 
+/* --------------------------------------------------------- telegram pairing */
+
+.pair-hint { margin: 0; font-size: 0.82rem; color: var(--text-dim); }
+.pair-steps {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.79rem;
+  color: var(--text-faint);
+}
+.pair-steps code,
+.pair-hint code {
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  background: var(--bg-input);
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--text-dim);
+}
+.pair-manual { display: flex; gap: 8px; }
+.pair-manual[hidden] { display: none; }
+.pair-manual .input { flex: 1 1 auto; min-width: 0; }
+.input-sm { padding: 6px 10px; font-size: 0.82rem; }
+.btn.is-busy { opacity: 0.75; cursor: progress; }
+
 /* ----------------------------------------------------------------- toasts */
 
 .toasts {

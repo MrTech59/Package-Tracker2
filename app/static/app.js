@@ -7,6 +7,7 @@ const state = {
   filters: { q: "", status: "all", carrier: "all", sort: "newest" },
   // Driven by the dashboard stat cards; null when no quick filter is active.
   statFilter: null,
+  pairing: null,
   expanded: new Set(),
   busy: new Set(),
 };
@@ -499,6 +500,25 @@ async function savePackage(event) {
 
 /* ---------------------------------------------------------------- diagnostics */
 
+async function checkTelegramDiag() {
+  const tgPill = $("diag-telegram");
+  tgPill.className = "pill pill-muted";
+  tgPill.textContent = "checking…";
+  $("diag-telegram-detail").textContent = "";
+  try {
+    const res = await api("/api/diagnostics/telegram");
+    tgPill.className = `pill pill-${res.ok ? "ok" : "bad"}`;
+    tgPill.textContent = res.ok ? `@${res.bot}` : "not working";
+    $("diag-telegram-detail").textContent = res.ok
+      ? `Bot: @${res.bot}${res.chat ? `\nChat: ${res.chat}` : "\nNo chat id configured"}`
+      : (res.error || "Telegram not configured");
+  } catch (err) {
+    tgPill.className = "pill pill-bad";
+    tgPill.textContent = "not configured";
+    $("diag-telegram-detail").textContent = err.message;
+  }
+}
+
 async function openSettings() {
   const dialog = $("dialog-settings");
   const cfg = state.config;
@@ -510,11 +530,8 @@ async function openSettings() {
   dialog.showModal();
 
   const mcpPill = $("diag-mcp");
-  const tgPill = $("diag-telegram");
   mcpPill.className = "pill pill-muted"; mcpPill.textContent = "checking…";
-  tgPill.className = "pill pill-muted"; tgPill.textContent = "checking…";
   $("diag-mcp-detail").textContent = "";
-  $("diag-telegram-detail").textContent = "";
 
   try {
     const res = await api("/api/diagnostics/mcp");
@@ -528,18 +545,9 @@ async function openSettings() {
     $("diag-mcp-detail").textContent = err.message;
   }
 
-  try {
-    const res = await api("/api/diagnostics/telegram");
-    tgPill.className = `pill pill-${res.ok ? "ok" : "bad"}`;
-    tgPill.textContent = res.ok ? `@${res.bot}` : "not working";
-    $("diag-telegram-detail").textContent = res.ok
-      ? `Bot: @${res.bot}${res.chat ? `\nChat: ${res.chat}` : "\nNo chat id configured"}`
-      : (res.error || "Telegram not configured");
-  } catch (err) {
-    tgPill.className = "pill pill-bad"; tgPill.textContent = "not configured";
-    $("diag-telegram-detail").textContent = err.message;
-  }
+  await Promise.all([checkTelegramDiag(), refreshPairing()]);
 }
+
 
 async function testTelegram() {
   const btn = $("btn-telegram-test");
@@ -553,6 +561,138 @@ async function testTelegram() {
     btn.disabled = false;
   }
 }
+
+/* ----------------------------------------------------------- telegram pairing */
+
+async function refreshPairing() {
+  const pill = $("pair-status");
+  const detail = $("pair-detail");
+  const hint = $("pair-hint");
+  const steps = $("pair-steps");
+  const pairAuto = $("btn-pair-auto");
+  const pairManual = $("btn-pair-manual");
+  const unpair = $("btn-unpair");
+
+  try {
+    const p = await api("/api/telegram/pair");
+    state.pairing = p;
+
+    if (!p.has_token) {
+      pill.className = "pill pill-bad";
+      pill.textContent = "no bot token";
+      hint.textContent =
+        "Add TELEGRAM_BOT_TOKEN to your .env file, then restart the service to enable pairing.";
+      steps.hidden = true;
+      pairAuto.disabled = true;
+      pairManual.disabled = true;
+      unpair.hidden = true;
+      detail.textContent = "";
+      return;
+    }
+
+    pairAuto.disabled = false;
+    pairManual.disabled = false;
+    steps.hidden = false;
+
+    if (p.paired) {
+      pill.className = `pill pill-${p.notifications_enabled ? "ok" : "warn"}`;
+      pill.textContent = p.notifications_enabled ? "paired" : "paired · alerts off";
+      const label = p.chat_name ? `${p.chat_name}` : "unknown chat";
+      const source = p.paired_via_dashboard ? "paired from the dashboard" : "from .env";
+      hint.textContent = `Alerts are linked to ${label} (${source}).`;
+      detail.textContent =
+        `Chat ID: ${p.chat_id}\n` +
+        `Source:  ${source}\n` +
+        `Alerts:  ${p.notifications_enabled ? "enabled" : "disabled"}`;
+      unpair.hidden = !p.paired_via_dashboard;
+    } else {
+      pill.className = "pill pill-warn";
+      pill.textContent = "not paired";
+      hint.textContent =
+        "Pair the tracker with your Telegram chat to receive delivery alerts.";
+      detail.textContent = "";
+      unpair.hidden = true;
+    }
+  } catch (err) {
+    pill.className = "pill pill-bad";
+    pill.textContent = "error";
+    detail.textContent = err.message;
+  }
+}
+
+async function pairAutomatically() {
+  const btn = $("btn-pair-auto");
+  const detail = $("pair-detail");
+  btn.disabled = true;
+  btn.classList.add("is-busy");
+  const original = btn.textContent;
+  btn.textContent = "Waiting for your message…";
+  detail.textContent =
+    "Open Telegram and send /start to your bot now. Listening for up to 20 seconds…";
+
+  try {
+    const res = await api("/api/telegram/pair/auto?timeout=20", { method: "POST" });
+    const chat = res.chat || {};
+    toast(`Paired with ${chat.name || chat.chat_id}.`, "ok");
+    if (!res.confirmation_sent) {
+      toast(
+        "Paired, but the confirmation message could not be sent. " +
+          (res.confirmation_error || ""),
+        "err",
+        7000
+      );
+    }
+    await refreshPairing();
+    await checkTelegramDiag();
+  } catch (err) {
+    detail.textContent = err.message;
+    toast(`Pairing failed: ${err.message}`, "err", 7000);
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove("is-busy");
+    btn.textContent = original;
+  }
+}
+
+function toggleManualPair() {
+  const box = $("pair-manual");
+  box.hidden = !box.hidden;
+  if (!box.hidden) $("pair-chat-id").focus();
+}
+
+async function saveManualPair() {
+  const input = $("pair-chat-id");
+  const chatId = input.value.trim();
+  if (!chatId) {
+    toast("Enter a chat ID first.", "err");
+    return;
+  }
+  try {
+    await api("/api/telegram/pair", {
+      method: "POST",
+      body: { chat_id: chatId },
+    });
+    toast(`Paired with chat ${chatId}.`, "ok");
+    input.value = "";
+    $("pair-manual").hidden = true;
+    await refreshPairing();
+    await checkTelegramDiag();
+  } catch (err) {
+    toast(`Could not pair: ${err.message}`, "err", 6000);
+  }
+}
+
+async function unpairTelegram() {
+  try {
+    await api("/api/telegram/pair", { method: "DELETE" });
+    toast("Telegram unpaired.", "ok");
+    await refreshPairing();
+    await checkTelegramDiag();
+  } catch (err) {
+    toast(`Could not unpair: ${err.message}`, "err", 6000);
+  }
+}
+
 
 async function exportData() {
   try {
@@ -714,6 +854,16 @@ function wireEvents() {
   document.querySelector("[data-action='cancel']").addEventListener("click", () => $("dialog-package").close());
   document.querySelector("[data-action='close-settings']").addEventListener("click", () => $("dialog-settings").close());
   $("btn-telegram-test").addEventListener("click", testTelegram);
+  $("btn-pair-auto").addEventListener("click", pairAutomatically);
+  $("btn-pair-manual").addEventListener("click", toggleManualPair);
+  $("btn-pair-save").addEventListener("click", saveManualPair);
+  $("btn-unpair").addEventListener("click", unpairTelegram);
+  $("pair-chat-id").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      saveManualPair();
+    }
+  });
   $("btn-export").addEventListener("click", exportData);
   $("btn-import").addEventListener("click", () => $("import-file").click());
   $("import-file").addEventListener("change", (e) => {
