@@ -37,9 +37,20 @@ mkdir -p "${INSTALL_DIR}"
 install -d -m 0755 "${INSTALL_DIR}"
 cp -r "${SRC_DIR}/app" "${INSTALL_DIR}/"
 cp "${SRC_DIR}/run.py" "${SRC_DIR}/requirements.txt" "${INSTALL_DIR}/"
+if [[ -d "${SRC_DIR}/scripts" ]]; then
+  cp -r "${SRC_DIR}/scripts" "${INSTALL_DIR}/"
+fi
 if [[ -f "${SRC_DIR}/.env.example" ]]; then
   cp "${SRC_DIR}/.env.example" "${INSTALL_DIR}/.env.example"
 fi
+
+# Strip bytecode and caches so we never ship .pyc files built on another
+# machine/OS (they are ignored by Python, but they are clutter).
+echo "==> Removing cached bytecode"
+find "${INSTALL_DIR}/app" "${INSTALL_DIR}/scripts" \
+  -type d -name '__pycache__' -prune -exec rm -rf {} + 2>/dev/null || true
+find "${INSTALL_DIR}/app" "${INSTALL_DIR}/scripts" \
+  -type f -name '*.py[co]' -delete 2>/dev/null || true
 
 echo "==> Creating Python virtualenv"
 python3 -m venv "${INSTALL_DIR}/venv"

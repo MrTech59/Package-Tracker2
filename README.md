@@ -73,7 +73,6 @@ Verify your MCP server is reachable and the scrape pipeline works:
 ```bash
 python scripts/verify_mcp.py
 ```
-
 ---
 
 ## Deploy to a Proxmox LXC
@@ -106,6 +105,18 @@ journalctl -u package-tracker -f
 
 The service is bound to `0.0.0.0:8080` by default, so reach it at
 `http://<lxc-ip>:8080`.
+
+The install is clean: `data/` starts empty, so the tracker opens with no
+packages. Cached bytecode from the source machine is stripped during install.
+
+To check MCP connectivity from the LXC, use the installed virtualenv:
+
+```bash
+cd /opt/package-tracker && ./venv/bin/python scripts/verify_mcp.py
+```
+
+(or use **Settings → MCP browser server** in the dashboard, which does the same
+check.)
 
 ---
 
