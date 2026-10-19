@@ -95,6 +95,36 @@ The installer:
 - creates `/opt/package-tracker/.env` from the example,
 - registers and starts a hardened `systemd` unit.
 
+Running it again over an existing install behaves like an update: it keeps
+your `data/` and `.env`.
+
+### Updating
+
+```bash
+cd /root/package-tracker   # the project dir you installed from
+git pull                   # or copy the new version in
+sudo ./install.sh --update
+```
+
+`--update` is safe by design:
+
+- **Your data is never touched.** `data/tracker.db` and `.env` are preserved
+  exactly as they are; only code (`app/`, `scripts/`, `run.py`,
+  `requirements.txt`) is replaced.
+- **A snapshot is taken first.** The database, `.env` and the old code go to
+  `/var/backups/package-tracker/<timestamp>/` (the 5 most recent are kept).
+- **It verifies the new version actually starts.** After restarting, the
+  installer polls `/api/health`. If it doesn't come up healthy, it
+  automatically **rolls back** to the previous code and database and restarts
+  the old version.
+
+Other modes:
+
+```bash
+sudo ./install.sh --uninstall   # stop + remove the unit, keep data/.env
+sudo ./install.sh --help
+```
+
 Then edit the config and restart:
 
 ```bash
@@ -261,7 +291,7 @@ app/
   main.py            FastAPI app + static hosting
 scripts/verify_mcp.py  live MCP pipeline check
 tests/                 42 unit tests
-install.sh             LXC systemd installer
+install.sh             LXC systemd installer / updater (--update)
 ```
 
 ---
