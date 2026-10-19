@@ -1,0 +1,17 @@
+{
+  "name": "Package Tracker",
+  "short_name": "Packages",
+  "description": "Self-hosted shipment tracking with Telegram alerts.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f1420",
+  "theme_color": "#0f1420",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
