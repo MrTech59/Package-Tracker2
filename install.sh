@@ -86,7 +86,15 @@ fi
 log "Installing system packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq python3 python3-venv python3-pip ca-certificates
+apt-get install -y -qq python3 python3-venv python3-pip ca-certificates git
+
+# If this is a git repo and we're updating from the project directory, pull latest
+if [[ "$IS_UPDATE" == "1" ]] && git -C "${SRC_DIR}" rev-parse --git-dir >/dev/null 2>&1; then
+  log "Pulling latest changes from git"
+  git -C "${SRC_DIR}" fetch --quiet origin 2>/dev/null || true
+  git -C "${SRC_DIR}" reset --hard origin/HEAD 2>/dev/null || git -C "${SRC_DIR}" pull --ff-only 2>/dev/null || warn "Could not pull latest changes from git (using local files)"
+  ok "Git repository updated"
+fi
 
 # 2 ------------------------------------------------------------ service user
 if ! id -u "${SERVICE_USER}" >/dev/null 2>&1; then
