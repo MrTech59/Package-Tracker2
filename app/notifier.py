@@ -55,12 +55,18 @@ class TelegramNotifier:
             and self.settings.telegram_chat_id
         )
 
+    @property
+    def _base(self) -> str:
+        """Bot API root for the current token."""
+        root = (self.settings.telegram_api_base or "https://api.telegram.org").rstrip("/")
+        return f"{root}/bot{self.settings.telegram_bot_token}"
+
     async def send_message(self, text: str) -> dict[str, Any]:
         """Send an arbitrary HTML message. Never raises."""
         if not self.enabled:
             return {"ok": False, "skipped": True, "reason": "Telegram is not configured"}
 
-        url = f"https://api.telegram.org/bot{self.settings.telegram_bot_token}/sendMessage"
+        url = f"{self._base}/sendMessage"
         payload = {
             "chat_id": self.settings.telegram_chat_id,
             "text": text,
@@ -127,13 +133,18 @@ class TelegramNotifier:
         """Verify the bot token and chat reachability via getMe + getChat."""
         if not self.settings.telegram_bot_token:
             return {"ok": False, "error": "No bot token configured"}
-        base = f"https://api.telegram.org/bot{self.settings.telegram_bot_token}"
+        base = self._base
         try:
             async with httpx.AsyncClient(timeout=self.settings.telegram_timeout_seconds) as client:
                 me = await client.get(f"{base}/getMe")
                 me_body = me.json()
                 if not me_body.get("ok"):
-                    return {"ok": False, "error": me_body.get("description", "getMe failed")}
+                    # Run it through the same translation as getUpdates: a bare
+                    # "Unauthorized" tells the user nothing useful.
+                    return {
+                        "ok": False,
+                        "error": self._explain_error(me_body, me.status_code),
+                    }
 
                 result: dict[str, Any] = {
                     "ok": True,
@@ -149,10 +160,10 @@ class TelegramNotifier:
                         result["chat"] = chat_body["result"].get("title") or chat_body["result"].get("username")
                     else:
                         result["ok"] = False
-                        result["error"] = chat_body.get("description", "getChat failed")
+                        result["error"] = self._explain_error(chat_body, chat.status_code)
                 return result
         except httpx.HTTPError as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": f"Could not reach Telegram: {exc}"}
 
     # ------------------------------------------------------------- pairing
 
@@ -166,7 +177,7 @@ class TelegramNotifier:
         if not self.settings.telegram_bot_token:
             return {"ok": False, "error": "No bot token configured"}
 
-        url = f"https://api.telegram.org/bot{self.settings.telegram_bot_token}/getUpdates"
+        url = f"{self._base}/getUpdates"
         params: dict[str, Any] = {
             "timeout": 0,
             "allowed_updates": '["message","channel_post"]',
@@ -202,9 +213,10 @@ class TelegramNotifier:
 
         if error_code == 401 or "unauthorized" in lowered:
             return (
-                "Telegram rejected the bot token (401 Unauthorized). "
-                "Check TELEGRAM_BOT_TOKEN in your .env file -- it should look like "
-                "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ."
+                "Telegram rejected the bot token (401 Unauthorized). Check that you "
+                "pasted the whole token from @BotFather (/newbot); it should "
+                "look like 123456789:ABCdefGhIJKlmnoPQRsTUVwxyZ. To replace an "
+                "existing token, paste the new one and press Save token again."
             )
         if error_code == 409 or "conflict" in lowered:
             return (
@@ -320,7 +332,7 @@ class TelegramNotifier:
         """Send an HTML message to a specific chat, ignoring the configured one."""
         if not self.settings.telegram_bot_token:
             return {"ok": False, "error": "No bot token configured"}
-        url = f"https://api.telegram.org/bot{self.settings.telegram_bot_token}/sendMessage"
+        url = f"{self._base}/sendMessage"
         payload = {
             "chat_id": chat_id,
             "text": text,

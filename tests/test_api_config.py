@@ -126,12 +126,14 @@ class TestHiddenElementsStayHidden(unittest.TestCase):
         self.assertNotIn(".pair-manual[hidden]", self.css)
 
     def test_no_token_state_keeps_buttons_clickable(self):
-        # Pressing them must explain the missing token, not sit dead.
+        # Pressing them must point at the token box, not sit dead.
         block = self._branch("if (!p.has_token)")
         self.assertIn("pairAuto.disabled = false", block)
         self.assertIn("pairManual.disabled = false", block)
         self.assertIn("unpair.hidden = true", block)
-        self.assertIn("TELEGRAM_BOT_TOKEN", block)
+        # The prompt is now the in-page token field, not a .env instruction.
+        self.assertIn("bot token", block)
+        self.assertIn("pair-token", self.js)
 
     def test_pair_handlers_guard_on_missing_token(self):
         self.assertIn("showMissingTokenHelp", self.js)

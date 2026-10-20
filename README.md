@@ -178,36 +178,52 @@ MCP_TIMEOUT_SECONDS=60
 
 ### Telegram
 
-You need a bot token; the chat is then paired either from the dashboard (easiest)
-or by hand.
+You need a bot token. Everything after that can be done from the dashboard —
+no file editing and no shell access required.
 
 **1. Create the bot.** Message [@BotFather](https://t.me/botfather), run
-`/newbot`, and copy the token. Put it in your `.env`:
+`/newbot`, and copy the token.
+
+**2. Paste it into the dashboard.** Open **⚙︎ Settings → Telegram pairing** and
+paste the token into the **Bot token** box, then press **Save token**. The
+server verifies it against Telegram straight away, so a typo is reported
+immediately rather than silently failing later.
+
+The token is saved in two places, which matters:
+
+| Where | Why |
+|---|---|
+| the database (`data/tracker.db`) | the running process picks it up on restart even if nothing else changed |
+| `TELEGRAM_BOT_TOKEN` in `.env` | survives a full reinstall, and `systemctl restart` / the installer see it |
+
+The field is masked, the token is never sent back to the browser, and
+**Forget token** removes the dashboard copy (falling back to whatever `.env`
+provides).
+
+**3. Pair a chat.** Send `/start` to your bot in Telegram, then press
+**Pair automatically**. The server watches `getUpdates` for up to 20 seconds,
+links whichever chat wrote in, stores the chat id in the database, and sends a
+confirmation message.
+
+You can also press **Enter chat ID** and paste a numeric id if you already know
+it (useful for group chats).
+
+**Prefer .env?** Set the token there before first start and it is used as-is:
 
 ```ini
 TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
 ```
 
+| Variable | Default | Purpose |
+|---|---|---|
+| `TELEGRAM_BOT_TOKEN` | *(empty)* | Bot token from @BotFather; the dashboard can set this instead |
+| `TELEGRAM_CHAT_ID` | *(empty)* | Chat to notify; only needed if you skip dashboard pairing |
+| `TELEGRAM_ENABLED` | *(auto)* | Setting `false` explicitly keeps alerts off even when paired |
+| `TELEGRAM_TIMEOUT_SECONDS` | `15` | Per-request timeout for the Bot API |
+| `TELEGRAM_API_BASE` | `https://api.telegram.org` | Point at a self-hosted Bot API server |
+
 Leave `TELEGRAM_CHAT_ID` blank and leave `TELEGRAM_ENABLED` unset — pairing
-turns alerts on for you.
-
-**2a. Pair from the dashboard (recommended).** Open **⚙︎ Settings → Telegram
-pairing**, then:
-
-1. Open Telegram and send `/start` to your bot.
-2. Press **Pair automatically**. The server watches `getUpdates` for up to 20
-   seconds, links whichever chat wrote in, stores the chat id in the database,
-   and sends a confirmation message.
-
-You can also press **Enter chat ID** and paste a numeric id if you already know
-it (useful for group chats).
-
-**2b. Pair by hand.** Set the id in `.env` instead:
-
-```bash
-# Send your bot a message first, then read the chat id from:
-curl "https://api.telegram.org/bot<TOKEN>/getUpdates"
-```
+turns alerts on for you. Alternatively set the chat explicitly:
 
 ```ini
 TELEGRAM_CHAT_ID=987654321
@@ -216,13 +232,16 @@ TELEGRAM_ENABLED=true
 
 **Notes**
 
-- A chat paired from the dashboard is saved in the database and **takes priority
-  over `TELEGRAM_CHAT_ID`**, so you can change it without editing files or
-  restarting.
+- A token saved from the dashboard **takes priority over** `TELEGRAM_BOT_TOKEN`
+  in `.env`, and a chat paired from the dashboard **takes priority over**
+  `TELEGRAM_CHAT_ID`. Both survive restarts.
 - **Unpair** clears the dashboard pairing and falls back to `TELEGRAM_CHAT_ID`.
+- **Forget token** clears the dashboard token and falls back to `.env`.
 - Pairing auto-enables notifications *unless* you explicitly set
   `TELEGRAM_ENABLED=false`, which is treated as a deliberate "keep alerts off".
 - Use **Settings → Send test message** to confirm delivery.
+- `TELEGRAM_API_BASE` (default `https://api.telegram.org`) points the
+  integration at a different Bot API server if you run one locally.
 
 ### Optional API key
 
@@ -284,8 +303,10 @@ All routes are under `/api`. Add `X-Api-Key` when `API_KEY` is set.
 | `GET` | `/api/diagnostics/telegram` | Bot + chat validation |
 | `POST` | `/api/diagnostics/telegram/test` | Send a test message |
 | `GET` | `/api/telegram/pair` | Current pairing state |
+| `PUT` | `/api/telegram/token` | Save + verify the bot token (dashboard path) |
+| `DELETE` | `/api/telegram/token` | Forget the dashboard-saved token |
 | `POST` | `/api/telegram/pair/auto` | Wait for a message, then pair that chat |
-| `POST` | `/api/telegram/pair` | Pair a specific chat id |
+| `POST` | `/api/telegram/pair` | Pair a specific chat id (may include a token) |
 | `DELETE` | `/api/telegram/pair` | Unpair (fall back to `TELEGRAM_CHAT_ID`) |
 | `GET` | `/api/export` | Download JSON |
 | `POST` | `/api/import` · `/api/import/raw` | Restore JSON |

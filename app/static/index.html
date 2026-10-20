@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#0f1420" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="stylesheet" href="/static/styles.css?v=1.2.1" />
+  <link rel="stylesheet" href="/static/styles.css?v=1.3.0" />
 </head>
 <body>
   <header class="topbar">
@@ -203,11 +203,27 @@
           Pair the tracker with your Telegram chat to receive delivery alerts.
         </p>
 
-        <ol class="pair-steps" id="pair-steps">
-          <li>Add your bot token in <code>.env</code> (<code>TELEGRAM_BOT_TOKEN</code>) and restart, if you haven't.</li>
-          <li>Open Telegram and send <code>/start</code> to your bot.</li>
-          <li>Press <b>Pair automatically</b> below — it waits for your message and links the chat.</li>
-        </ol>
+        <div class="pair-token">
+          <label class="pair-label" for="pair-token">Bot token</label>
+          <div class="pair-token-row">
+            <input
+              class="input input-sm"
+              id="pair-token"
+              type="password"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="123456789:ABCdefGhIJKlmnoPQRsTUVwxyZ"
+            />
+            <button class="btn btn-ghost btn-sm" type="button" id="btn-pair-token-save">Save token</button>
+            <button class="btn btn-ghost btn-sm" type="button" id="btn-pair-token-clear" hidden>Forget token</button>
+          </div>
+          <p class="pair-token-help" id="pair-token-help">
+            Paste the token from <code>@BotFather</code> (<code>/newbot</code>). It is stored on
+            this server and kept for restarts.
+          </p>
+        </div>
+
+        <ol class="pair-steps" id="pair-steps"></ol>
 
         <pre id="pair-detail" class="diag-detail"></pre>
 
@@ -245,6 +261,6 @@
 
   <div id="toasts" class="toasts" aria-live="polite"></div>
 
-  <script src="/static/app.js?v=1.2.1" defer></script>
+  <script src="/static/app.js?v=1.3.0" defer></script>
 </body>
 </html>

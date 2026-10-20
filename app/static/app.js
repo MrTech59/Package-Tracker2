@@ -603,16 +603,42 @@ async function refreshPairing() {
   const pairAuto = $("btn-pair-auto");
   const pairManual = $("btn-pair-manual");
   const unpair = $("btn-unpair");
+  const tokenInput = $("pair-token");
+  const tokenSave = $("btn-pair-token-save");
+  const tokenClear = $("btn-pair-token-clear");
+  const tokenHelp = $("pair-token-help");
 
   try {
     const p = await api("/api/telegram/pair");
     state.pairing = p;
 
+    // A saved token is never sent back to the browser, so the field is left
+    // blank and its state is shown in the help text instead. The input only
+    // needs to be filled in when there is no working token yet.
+    if (p.has_token && document.activeElement !== tokenInput) {
+      tokenInput.value = "";
+    }
+    tokenInput.placeholder = p.has_token
+      ? `Token saved (${p.token_hint || "from .env"}) — paste a new one to replace`
+      : "123456789:ABCdefGhIJKlmnoPQRsTUVwxyZ";
+    tokenClear.hidden = p.token_source !== "dashboard";
+
+    if (p.has_token) {
+      tokenHelp.innerHTML =
+        p.token_source === "dashboard"
+          ? `Using the token saved here (<code>${p.token_hint}</code>).`
+          : `Using <code>TELEGRAM_BOT_TOKEN</code> from the server's <code>.env</code>.`;
+    } else {
+      tokenHelp.innerHTML =
+        "Paste the token from <code>@BotFather</code> (<code>/newbot</code>), then press " +
+        "<b>Save token</b>. It is stored on this server and kept for restarts.";
+    }
+
     if (!p.has_token) {
-      pill.className = "pill pill-bad";
-      pill.textContent = "no bot token";
+      pill.className = "pill pill-warn";
+      pill.textContent = "setup needed";
       hint.textContent =
-        "Add TELEGRAM_BOT_TOKEN to your .env file, then restart the service to enable pairing.";
+        "Enter your Telegram bot token below to get started — no server access needed.";
       steps.hidden = true;
       // Keep these clickable so pressing them explains what is missing
       // instead of appearing dead.
@@ -621,13 +647,7 @@ async function refreshPairing() {
       pairAuto.classList.add("is-blocked");
       pairManual.classList.add("is-blocked");
       unpair.hidden = true;
-      detail.textContent =
-        `TELEGRAM_BOT_TOKEN is not set, so there is nothing to pair with yet.\n\n` +
-        `On the server:\n` +
-        `  nano /opt/package-tracker/.env\n` +
-        `  TELEGRAM_BOT_TOKEN=123456:ABC-DEF...\n` +
-        `  systemctl restart package-tracker\n\n` +
-        `Get a token from @BotFather in Telegram (/newbot).`;
+      detail.textContent = "";
       return;
     }
 
@@ -636,14 +656,16 @@ async function refreshPairing() {
     pairAuto.classList.remove("is-blocked");
     pairManual.classList.remove("is-blocked");
     steps.hidden = false;
+    steps.innerHTML =
+      "<li>Open Telegram and send <code>/start</code> to your bot.</li>" +
+      "<li>Press <b>Pair automatically</b> below — it waits for your message and links the chat.</li>";
 
     if (p.paired) {
       pill.className = `pill pill-${p.notifications_enabled ? "ok" : "warn"}`;
       pill.textContent = p.notifications_enabled ? "paired" : "paired · alerts off";
       const label = p.chat_name ? `${p.chat_name}` : "unknown chat";
       const source = p.paired_via_dashboard ? "paired from the dashboard" : "from .env";
-      hint.textContent = `Alerts are linked to ${label} (${source}).`;
-      detail.textContent =
+      hint.textContent = `Alerts are linked to ${label} (${source}).`;      detail.textContent =
         `Chat ID: ${p.chat_id}\n` +
         `Source:  ${source}\n` +
         `Alerts:  ${p.notifications_enabled ? "enabled" : "disabled"}`;
@@ -660,6 +682,59 @@ async function refreshPairing() {
     pill.className = "pill pill-bad";
     pill.textContent = "error";
     detail.textContent = err.message;
+  }
+}
+
+/* Save the bot token entered in the dashboard, then verify it with Telegram. */
+async function saveBotToken() {
+  const input = $("pair-token");
+  const btn = $("btn-pair-token-save");
+  const detail = $("pair-detail");
+  const token = input.value.trim();
+
+  if (!token) {
+    toast("Paste your bot token first.", "err");
+    input.focus();
+    return;
+  }
+
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.textContent = "Checking…";
+  detail.textContent = "Saving the token and checking it with Telegram…";
+
+  try {
+    const res = await api("/api/telegram/token", {
+      method: "PUT",
+      body: JSON.stringify({ bot_token: token }),
+    });
+    input.value = "";
+    toast(`Token verified — connected as @${res.bot}. Now send /start to your bot.`, "ok", 7000);
+    detail.textContent = res.saved_to_env
+      ? "Token verified and saved to .env."
+      : `Token verified for this session, but .env could not be written` +
+        (res.env_error ? ` (${res.env_error})` : "") +
+        ".\nFix that, or the token is lost on the next full reinstall.";
+    await refreshPairing();
+    await checkTelegramDiag();
+  } catch (err) {
+    detail.textContent = err.message;
+    toast(`Token rejected: ${err.message}`, "err", 8000);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+}
+
+async function forgetBotToken() {
+  if (!confirm("Forget the token saved from this dashboard?")) return;
+  try {
+    await api("/api/telegram/token", { method: "DELETE" });
+    toast("Dashboard token forgotten.", "ok");
+    await refreshPairing();
+    await checkTelegramDiag();
+  } catch (err) {
+    toast(`Could not forget the token: ${err.message}`, "err", 6000);
   }
 }
 
@@ -715,18 +790,12 @@ function toggleManualPair() {
   if (!box.hidden) $("pair-chat-id").focus();
 }
 
-/* Explain how to fix the missing bot token, and copy a ready-to-paste line. */
+/* Point the user at the token box instead of the shell. */
 function showMissingTokenHelp() {
-  const detail = $("pair-detail");
-  detail.textContent =
-    `TELEGRAM_BOT_TOKEN is not set, so there is no bot to pair with yet.\n\n` +
-    `1. In Telegram, message @BotFather and send /newbot to get a token.\n` +
-    `2. On the server:\n` +
-    `     nano /opt/package-tracker/.env\n` +
-    `     TELEGRAM_BOT_TOKEN=<your token>\n` +
-    `     systemctl restart package-tracker\n` +
-    `3. Reopen Settings, then press Pair automatically.`;
-  toast("No Telegram bot token configured yet — see the steps shown.", "err", 5000);
+  const input = $("pair-token");
+  $("pair-detail").textContent = "";
+  toast("Add your bot token in the box above first (@BotFather → /newbot).", "err", 6000);
+  input.focus();
 }
 
 async function saveManualPair() {
@@ -741,10 +810,15 @@ async function saveManualPair() {
     return;
   }
   try {
+    // Include a token typed into the box, so both steps can be done at once.
+    const botToken = $("pair-token").value.trim();
+    const body = { chat_id: chatId };
+    if (botToken) body.bot_token = botToken;
     await api("/api/telegram/pair", {
       method: "POST",
-      body: { chat_id: chatId },
+      body,
     });
+    if (botToken) $("pair-token").value = "";
     toast(`Paired with chat ${chatId}.`, "ok");
     input.value = "";
     $("pair-manual").hidden = true;
@@ -927,10 +1001,18 @@ function wireEvents() {
   document.querySelector("[data-action='cancel']").addEventListener("click", () => $("dialog-package").close());
   document.querySelector("[data-action='close-settings']").addEventListener("click", () => $("dialog-settings").close());
   $("btn-telegram-test").addEventListener("click", testTelegram);
+  $("btn-pair-token-save").addEventListener("click", saveBotToken);
+  $("btn-pair-token-clear").addEventListener("click", forgetBotToken);
   $("btn-pair-auto").addEventListener("click", pairAutomatically);
   $("btn-pair-manual").addEventListener("click", toggleManualPair);
   $("btn-pair-save").addEventListener("click", saveManualPair);
   $("btn-unpair").addEventListener("click", unpairTelegram);
+  $("pair-token").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      saveBotToken();
+    }
+  });
   $("pair-chat-id").addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();

@@ -28,6 +28,64 @@ def _env_bool(key: str, default: bool) -> bool:
     return val.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def dotenv_path() -> Path:
+    """Where the runtime .env lives (repo root in dev, /opt/... when installed)."""
+    override = os.environ.get("DOTENV_PATH")
+    if override:
+        return Path(override)
+    return Path(__file__).resolve().parent.parent / ".env"
+
+
+def _quote_env(value: str) -> str:
+    """Render a value so _load_dotenv reads it back unchanged."""
+    if value == "" or any(c in value for c in ' \t#"\'$`\\'):
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+    return value
+
+
+def save_env_values(updates: dict[str, str], path: Path | None = None) -> Path:
+    """Create or update keys in the .env file, preserving everything else.
+
+    Comments, blank lines, and the ordering of existing keys are kept so a
+    hand-edited file is not mangled. Values are written back inside quotes
+    when they contain characters a shell would otherwise eat.
+    """
+    target = path or dotenv_path()
+    remaining = dict(updates)
+
+    lines: list[str] = []
+    if target.is_file():
+        lines = target.read_text(encoding="utf-8").splitlines()
+
+    out: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            key = stripped.partition("=")[0].strip()
+            if key in remaining:
+                out.append(f"{key}={_quote_env(remaining.pop(key))}")
+                continue
+        out.append(line)
+
+    # Anything not already present is appended under a clear heading.
+    if remaining:
+        if out and out[-1].strip():
+            out.append("")
+        for key, value in remaining.items():
+            out.append(f"{key}={_quote_env(value)}")
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    text = "\n".join(out).rstrip("\n") + "\n"
+    target.write_text(text, encoding="utf-8")
+    # The token lives here, so keep it readable only by the owner.
+    try:
+        target.chmod(0o600)
+    except OSError:  # pragma: no cover - platform dependent
+        pass
+    return target
+
+
 @dataclass
 class Settings:
     """Runtime settings for the tracker."""
@@ -60,6 +118,8 @@ class Settings:
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
     telegram_timeout_seconds: float = 15.0
+    # Overridable so a local Bot API server (or a test double) can be used.
+    telegram_api_base: str = "https://api.telegram.org"
 
     # --- Auth (optional, off by default) ---
     # When set, all /api routes require header `X-Api-Key: <value>`.
@@ -92,6 +152,9 @@ class Settings:
             telegram_bot_token=token,
             telegram_chat_id=chat_id,
             telegram_timeout_seconds=float(os.environ.get("TELEGRAM_TIMEOUT_SECONDS", "15")),
+            telegram_api_base=os.environ.get(
+                "TELEGRAM_API_BASE", "https://api.telegram.org"
+            ).rstrip("/"),
             api_key=os.environ.get("API_KEY", "").strip(),
         )
 
@@ -100,4 +163,4 @@ class Settings:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
 
-settings = Settings.load(Path(__file__).resolve().parent.parent / ".env")
+settings = Settings.load(dotenv_path())

@@ -492,6 +492,32 @@ textarea { resize: vertical; min-height: 68px; font-family: inherit; }
 .pair-manual { display: flex; gap: 8px; }
 .pair-manual .input { flex: 1 1 auto; min-width: 0; }
 .input-sm { padding: 6px 10px; font-size: 0.82rem; }
+
+/* Bot-token entry: the whole point is that no shell access is needed, so it
+   sits above the pair buttons with its own label and inline actions. */
+.pair-token { display: flex; flex-direction: column; gap: 5px; }
+.pair-label {
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+}
+.pair-token-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.pair-token-row .input {
+  flex: 1 1 240px;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+}
+.pair-token-help { margin: 0; font-size: 0.76rem; color: var(--text-faint); }
+.pair-token-help code {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  background: var(--bg-input);
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--text-dim);
+}
 .btn.is-busy { opacity: 0.75; cursor: progress; }
 /* Buttons that are clickable but need setup first: hint that they will
    explain rather than act. */

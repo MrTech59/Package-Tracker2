@@ -475,13 +475,15 @@ class TestTelegramErrorMessages(unittest.TestCase):
             {"ok": False, "error_code": 401, "description": "Unauthorized"}, 401
         )
         self.assertIn("bot token", message.lower())
-        self.assertIn("TELEGRAM_BOT_TOKEN", message)
+        # Guidance points at the dashboard flow now, not just .env.
+        self.assertIn("BotFather", message)
+        self.assertIn("Save token", message)
         # Must not just echo the opaque word back.
         self.assertNotEqual(message.strip(), "Unauthorized")
 
     def test_unauthorized_without_code_is_still_explained(self):
         message = TelegramNotifier._explain_error({"description": "Unauthorized"})
-        self.assertIn("TELEGRAM_BOT_TOKEN", message)
+        self.assertIn("BotFather", message)
 
     def test_conflict_is_explained(self):
         message = TelegramNotifier._explain_error(

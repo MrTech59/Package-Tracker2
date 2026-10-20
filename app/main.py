@@ -345,14 +345,53 @@ async def telegram_test() -> dict[str, Any]:
 
 
 class PairIn(BaseModel):
-    chat_id: str = Field(..., min_length=1, max_length=64)
+    chat_id: str = Field(default="", max_length=64)
     name: str = Field(default="", max_length=200)
+    bot_token: str = Field(default="", max_length=200)
+
+
+class TokenIn(BaseModel):
+    bot_token: str = Field(..., min_length=1, max_length=200)
 
 
 @app.get("/api/telegram/pair", dependencies=[Depends(require_api_key)])
 async def telegram_pair_status() -> dict[str, Any]:
     """Current pairing state, including whether a bot token is set."""
     return svc().pairing_status()
+
+
+@app.put("/api/telegram/token", dependencies=[Depends(require_api_key)])
+async def telegram_set_token(payload: TokenIn) -> dict[str, Any]:
+    """Save the bot token from the dashboard and verify it against Telegram."""
+    service = svc()
+    try:
+        stored = service.set_bot_token(payload.bot_token)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # Fail fast on a bad token rather than letting pairing time out later.
+    probe = await service.notifier.check_connection()
+    if not probe.get("ok"):
+        service.clear_bot_token()
+        raise HTTPException(
+            status_code=400,
+            detail=probe.get("error", "Telegram rejected that bot token."),
+        )
+
+    return {
+        "ok": True,
+        "bot": probe.get("bot", ""),
+        "saved_to_env": stored.get("saved_to_env", False),
+        "env_error": stored.get("env_error", ""),
+        "pairing": service.pairing_status(),
+    }
+
+
+@app.delete("/api/telegram/token", dependencies=[Depends(require_api_key)])
+async def telegram_clear_token() -> dict[str, Any]:
+    """Forget a dashboard-saved token (falls back to TELEGRAM_BOT_TOKEN in .env)."""
+    svc().clear_bot_token()
+    return {"ok": True, "pairing": svc().pairing_status()}
 
 
 @app.post("/api/telegram/pair/auto", dependencies=[Depends(require_api_key)])
@@ -368,9 +407,16 @@ async def telegram_pair_auto(
 
 @app.post("/api/telegram/pair", dependencies=[Depends(require_api_key)])
 async def telegram_pair_manual(payload: PairIn) -> dict[str, Any]:
-    """Pair with a chat id supplied directly (paste from @userinfobot etc.)."""
+    """Pair with a chat id supplied directly (paste from @userinfobot etc.).
+
+    A bot token may be included so the token box and the chat id can be
+    submitted together in one step.
+    """
+    service = svc()
     try:
-        pairing = svc().apply_pairing(payload.chat_id, payload.name)
+        if payload.bot_token:
+            service.set_bot_token(payload.bot_token)
+        pairing = service.apply_pairing(payload.chat_id, payload.name)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True, "pairing": pairing}

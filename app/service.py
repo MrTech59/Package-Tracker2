@@ -7,7 +7,7 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
-from .config import Settings
+from .config import Settings, save_env_values
 from .db import Database, utcnow
 from .models import Status, resolve_carrier
 from .notifier import TelegramNotifier
@@ -62,6 +62,16 @@ class TrackerService:
         # environment / .env. When they did, we honour their choice and never
         # auto-enable notifications; when they did not, pairing turns them on.
         self._telegram_explicitly_configured = os.environ.get("TELEGRAM_ENABLED") is not None
+        # The token from configuration (.env / environment), captured before
+        # anything is applied to the notifier. The notifier's `settings` is the
+        # *same object* as ours, so we cannot read it back to find the original
+        # value -- forgetting a dashboard token must restore this snapshot.
+        self._env_bot_token = (settings.telegram_bot_token or "").strip()
+        # A token saved through the dashboard outranks .env. Applied here so it
+        # also takes effect on a fresh boot, before the user opens Settings.
+        saved_token = self._saved_token()
+        if saved_token:
+            self.notifier.settings.telegram_bot_token = saved_token
 
     # ------------------------------------------------------------- read paths
 
@@ -236,9 +246,62 @@ class TrackerService:
     # --------------------------------------------------------------- pairing
 
     TELEGRAM_CHAT_META_KEY = "telegram_chat_id"
+    TELEGRAM_TOKEN_META_KEY = "telegram_bot_token"
 
     def _saved_chat_id(self) -> str:
         return (self.db.get_meta(self.TELEGRAM_CHAT_META_KEY) or "").strip()
+
+    def _saved_token(self) -> str:
+        return (self.db.get_meta(self.TELEGRAM_TOKEN_META_KEY) or "").strip()
+
+    @property
+    def _token(self) -> str:
+        """Active bot token: one saved from the dashboard, else configuration."""
+        saved = self._saved_token()
+        if saved:
+            return saved
+        return self._env_bot_token or (self.settings.telegram_bot_token or "").strip()
+
+    def set_bot_token(self, token: str) -> dict[str, Any]:
+        """Store the bot token and use it immediately.
+
+        The token is persisted in two places: the database (so the running
+        process picks it up on restart even if .env was never touched) and the
+        .env file (so `systemctl restart` and the installer keep it).
+        """
+        token = (token or "").strip()
+        if not token:
+            raise ValueError("Bot token is required.")
+        if ":" not in token or not token.split(":", 1)[0].isdigit():
+            raise ValueError(
+                "That does not look like a bot token. It should look like "
+                "123456789:ABCdefGhIJKlmnoPQRsTUVwxyZ."
+            )
+
+        self.db.set_meta(self.TELEGRAM_TOKEN_META_KEY, token)
+        self.notifier.settings.telegram_bot_token = token
+
+        saved_to_env = False
+        env_error = ""
+        try:
+            save_env_values({"TELEGRAM_BOT_TOKEN": token})
+            saved_to_env = True
+        except OSError as exc:
+            env_error = str(exc)
+
+        log.info("Telegram bot token saved (env=%s)", saved_to_env)
+        return {"saved_to_env": saved_to_env, "env_error": env_error}
+
+    def clear_bot_token(self) -> None:
+        """Forget a dashboard-saved token, falling back to .env."""
+        self.db.set_meta(self.TELEGRAM_TOKEN_META_KEY, "")
+        # `self.settings` was overwritten when the dashboard token was applied,
+        # so restore the value captured at construction instead of reading it
+        # back -- otherwise this would "clear" the token and keep right on
+        # using it.
+        fallback = self._env_bot_token
+        self.notifier.settings.telegram_bot_token = fallback
+        log.info("Telegram bot token cleared from the dashboard (env fallback=%s)", bool(fallback))
 
     def telegram_chat_id(self) -> str:
         """The active chat id: paired-at-runtime value wins over .env."""
@@ -301,8 +364,12 @@ class TrackerService:
         saved = self._saved_chat_id()
         chat_id = self.telegram_chat_id()
         configured = self._configured_chat_id()
+        token = self._token
         return {
-            "has_token": bool(self.settings.telegram_bot_token),
+            "has_token": bool(token),
+            "token_source": "dashboard" if self._saved_token() else ("env" if token else "none"),
+            # Only ever expose a masked hint, never the token itself.
+            "token_hint": f"…{token[-4:]}" if len(token) > 4 else "",
             "chat_id": chat_id,
             "chat_name": (self.db.get_meta(f"{self.TELEGRAM_CHAT_META_KEY}_name") or ""),
             "paired": bool(chat_id),
@@ -314,8 +381,8 @@ class TrackerService:
 
     async def auto_pair(self, timeout: float = 20.0) -> dict[str, Any]:
         """Wait for a Telegram message and pair with the chat that sent it."""
-        if not self.settings.telegram_bot_token:
-            return {"ok": False, "error": "Add TELEGRAM_BOT_TOKEN first."}
+        if not self._token:
+            return {"ok": False, "error": "Add your bot token first."}
 
         found = await self.notifier.find_chat(timeout=timeout)
         if not found.get("ok"):
